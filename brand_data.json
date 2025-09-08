@@ -1,0 +1,124 @@
+{
+  "brand": {
+    "name": "LCB - Navyakosh Organic Fertilizer",
+    "tagline": "Smart Organic Solution for Sustainable Farming",
+    "description": "Navyakosh is an advanced organic fertilizer made from cow dung, crop residues, and natural ingredients. It enriches soil health, improves fertility, enhances water retention, and is safe for crops, farmers, and the environment.",
+    "benefits": [
+      "Improves soil fertility and water-holding capacity",
+      "Contains 60+ beneficial microorganisms",
+      "Reduces dependence on chemical fertilizers",
+      "Eco-friendly and safe for long-term use",
+      "Boosts crop yield and quality",
+      "Retains water up to 268x its weight and reduces irrigation by 33%"
+    ],
+    "purchase": {
+      "online": "https://amzn.in/d/hBRlaGo",
+      "contact_number": "+91 91988 03978",
+      "dealers": "Available at authorized agricultural stores"
+    }
+  },
+  "products": [
+    {
+      "crop": "Wheat",
+      "applications": [
+        "4-5 bags (50kg) per acre before sowing",
+        "2-3 bags (50kg) after 45-60 days post-weeding (irrigated crops)"
+      ],
+      "mechanism": "Azospirillum, Azotobacter, PSB, and SSB microbes release nutrients and enrich soil."
+    },
+    {
+      "crop": "Maize",
+      "applications": [
+        "4-5 bags per acre before sowing",
+        "2-3 bags after 45-60 days post-weeding"
+      ],
+      "mechanism": "Azospirillum, PSB, VAM enhance nutrient absorption."
+    },
+    {
+      "crop": "Mustard",
+      "applications": [
+        "4-5 bags per acre before sowing",
+        "2-3 bags after 45-60 days post-weeding"
+      ],
+      "mechanism": "Azotobacter, PSB, SSB microbes improve fertility."
+    },
+    {
+      "crop": "Banana",
+      "applications": [
+        "500g per plant at transplantation",
+        "1 kg per plant after 6 months"
+      ],
+      "mechanism": "VAM, PSB, Azospirillum, KMB microbes improve nutrient absorption."
+    },
+    {
+      "crop": "Sugarcane",
+      "applications": [
+        "4-5 bags per acre at planting",
+        "3-4 bags per acre 120 days after sowing"
+      ],
+      "mechanism": "Azospirillum, Acetobacter, Azotobacter, PSB improve sucrose and tillering."
+    },
+    {
+      "crop": "Paddy",
+      "applications": [
+        "4-5 bags per acre during puddling",
+        "2-3 bags per acre after 45 days post-weeding"
+      ],
+      "mechanism": "SSB, PSB, Azotobacter improve nitrogen and phosphorus availability."
+    },
+    {
+      "crop": "Vegetables & Fruits",
+      "applications": [
+        "50-100g per plant at transplantation",
+        "Additional 100g per plant after 45 days"
+      ],
+      "mechanism": "VAM, PSB, Azotobacter, KMB improve flowering and fruit setting."
+    }
+  ],
+  "mechanism": {
+    "microbes": [
+      "Azospirillum - Nitrogen fixation",
+      "Azotobacter - Nitrogen enrichment",
+      "PSB (Phosphate Solubilizing Bacteria) - Unlocks phosphorus",
+      "SSB (Sulphur Solubilizing Bacteria) - Makes sulphur available",
+      "VAM (Vesicular Arbuscular Mycorrhiza) - Enhances root absorption",
+      "KMB (Potassium Mobilizing Bacteria) - Makes potassium available",
+      "Rhizobium - Fixes nitrogen for legumes",
+      "Pseudomonas - Enhances plant disease resistance"
+    ]
+  },
+  "faqs": [
+    {
+      "q": "What is Navyakosh Organic Fertilizer?",
+      "a": "It is a natural fertilizer made from cow dung, crop waste, and enriched with beneficial microbes. Unlike chemicals, it improves soil and leaves no harmful residue."
+    },
+    {
+      "q": "How does it improve soil health?",
+      "a": "It restores microbial balance, breaks down nutrients, improves fertility, and enhances water-holding capacity."
+    },
+    {
+      "q": "Can it reduce irrigation?",
+      "a": "Yes, it uses super absorbent polymer technology that reduces irrigation needs by up to 33%."
+    },
+    {
+      "q": "On which crops can it be used?",
+      "a": "It works for wheat, maize, rice, pulses, cotton, sugarcane, fruits, vegetables, spices, and more."
+    },
+    {
+      "q": "Is it safe for long-term soil health?",
+      "a": "Yes, it is 100% organic, free from chemicals, safe for crops, farmers, and the environment."
+    },
+    {
+      "q": "Can it replace chemical fertilizers?",
+      "a": "It reduces dependency on chemical fertilizers while maintaining or improving yields sustainably."
+    },
+    {
+      "q": "Where can I buy it?",
+      "a": "From authorized dealers, agri-stores, or online at Amazon: https://amzn.in/d/hBRlaGo. For bulk, contact +91 91988 03978."
+    },
+    {
+      "q": "What results can I expect?",
+      "a": "Farmers report higher yields, healthier crops, and improved soil. Studies show 29% higher grain yield and 24.8% better seed weight than chemicals."
+    }
+  ]
+}
