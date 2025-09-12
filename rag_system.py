@@ -10,17 +10,18 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
+
+# Embeddings (Gemini + HF fallback)
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_google_genai._common import GoogleGenerativeAIError
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 
 class RAGSystem:
     def __init__(self, gemini_api_key: str, collection_name: str = "brand_kb"):
         """
         RAG system for brand & product knowledge (Gemini + Chroma).
-
-        Args:
-            gemini_api_key: Google AI Studio (Gemini) API key
-            collection_name: ChromaDB collection name
+        Falls back to HuggingFace embeddings if Gemini fails (quota, rate-limit, or init error).
         """
         if not gemini_api_key:
             raise ValueError("Gemini API key is required")
@@ -28,11 +29,18 @@ class RAGSystem:
         self.gemini_api_key = gemini_api_key
         self.collection_name = collection_name
 
-        # Gemini embeddings
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            google_api_key=gemini_api_key
-        )
+        # Try to initialize Gemini embeddings (may raise on bad key or local env issues)
+        self.use_fallback = False
+        try:
+            self.embeddings = GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                google_api_key=self.gemini_api_key
+            )
+            print("✅ Initialized Gemini embeddings (GoogleGenerativeAIEmbeddings).")
+        except Exception as e:
+            print(f"⚠️ Gemini init failed ({e}). Falling back to HuggingFace embeddings.")
+            self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            self.use_fallback = True
 
         # ChromaDB persistent client
         self.chroma_client = chromadb.PersistentClient(
@@ -133,13 +141,50 @@ class RAGSystem:
 
     def build_vectorstore(self, json_path: Optional[str] = None, use_scraped: bool = True):
         """
-        Build vector DB from brand_data.json + scraped text files
+        Build or load vector DB with Gemini embeddings (fallback to HuggingFace).
+        This function will:
+         - try to load an existing collection (so we avoid re-embedding on every run)
+         - if no collection exists, build it (this will call embeddings)
+         - if Gemini raises a quota/rate-limit error during embedding, fallback to HF
         """
-        print("🔧 Building vector DB...")
+        print("🔧 Loading/Building vector DB...")
+
+        # Attempt to load an existing collection from disk (persistent Chroma)
+        try:
+            # Note: Chroma(...) loads an existing collection when available
+            self.vectorstore = Chroma(
+                collection_name=self.collection_name,
+                embedding_function=self.embeddings,
+                client=self.chroma_client
+            )
+            # Access internal collection count to decide if it's populated
+            try:
+                count = self.vectorstore._collection.count()
+            except Exception:
+                # If count not available due to API differences, ignore and try retriever
+                count = None
+
+            if count and count > 0:
+                print(f"✅ Loaded existing vector DB from disk (items: {count}). Using {'HuggingFace' if self.use_fallback else 'Gemini'} embeddings.")
+                return
+            # If count is None, we still attempt to use the loaded collection if retriever works
+            if count is None:
+                # Try a quick retriever call to confirm
+                try:
+                    retr = self.vectorstore.as_retriever()
+                    _ = retr.get_relevant_documents("test")
+                    print("✅ Loaded existing vector DB (no count available).")
+                    return
+                except Exception:
+                    # Fallthrough to rebuild
+                    pass
+        except Exception as e:
+            print(f"⚠️ Could not load existing DB cleanly: {e}. Will attempt to rebuild.")
+
+        # Build fresh documents list (brand JSON + products + faqs + scraped)
         data = self.load_brand_data(json_path=json_path)
         self.profile_summary = self._generate_summary_text(data)
 
-        # Create documents from brand_data.json
         docs: List[Document] = []
         if "brand" in data:
             docs.append(Document(
@@ -159,7 +204,6 @@ class RAGSystem:
                 metadata={"type": "faq"}
             ))
 
-        # Add scraped text files
         if use_scraped:
             try:
                 scraped_docs = self.load_scraped_text_data("scraped_data")
@@ -168,14 +212,43 @@ class RAGSystem:
             except Exception as e:
                 print(f"⚠️ Skipping scraped data: {e}")
 
-        # Build Chroma
-        self.vectorstore = Chroma.from_documents(
-            documents=docs,
-            embedding=self.embeddings,
-            collection_name=self.collection_name,
-            client=self.chroma_client
-        )
-        print("✅ Vector DB built successfully!")
+        # Now create embeddings + Chroma. Try Gemini first, fallback to HF on quota/errors.
+        tried_gemini = not self.use_fallback  # whether we should/are trying gemini
+        if tried_gemini:
+            try:
+                print("🔁 Attempting to build Chroma with Gemini embeddings...")
+                self.vectorstore = Chroma.from_documents(
+                    documents=docs,
+                    embedding=self.embeddings,
+                    collection_name=self.collection_name,
+                    client=self.chroma_client
+                )
+                self.use_fallback = False
+                print("✅ Vector DB built with Gemini embeddings!")
+                return
+            except GoogleGenerativeAIError as g_err:
+                # Explicit Gemini API error (likely quota/rate limit)
+                print(f"⚠️ Gemini embedding error caught: {g_err}. Falling back to HuggingFace embeddings.")
+                # fallthrough to fallback block below
+            except Exception as e:
+                # Other unforeseen errors from Gemini embedding attempt
+                print(f"⚠️ Error building with Gemini embeddings: {e}. Falling back to HuggingFace embeddings.")
+
+        # Fallback: HuggingFace local embeddings
+        try:
+            print("🔁 Building Chroma with HuggingFace embeddings (fallback)...")
+            self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            self.vectorstore = Chroma.from_documents(
+                documents=docs,
+                embedding=self.embeddings,
+                collection_name=self.collection_name,
+                client=self.chroma_client
+            )
+            self.use_fallback = True
+            print("✅ Vector DB built with HuggingFace embeddings (fallback).")
+        except Exception as e:
+            print(f"❌ Failed to build vector DB with HuggingFace embeddings: {e}")
+            raise
 
     # ---------------- Retrieval ----------------
 
@@ -202,7 +275,9 @@ class RAGSystem:
         ctx_parts = []
         for i, d in enumerate(unique_docs, 1):
             ctx_parts.append(f"Context {i}:\n{d.page_content}")
-        return "\n\n".join(ctx_parts)
+        engine = "HuggingFace" if self.use_fallback else "Gemini"
+        ctx = "\n\n".join(ctx_parts)
+        return f"<!-- embeddings_engine: {engine} -->\n\n{ctx}"
 
     # ---------------- Backward compatibility ----------------
 
