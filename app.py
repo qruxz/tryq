@@ -1,4 +1,4 @@
-# app.py (English + Hinglish + Hindi support)
+# Fixed app.py with two-language toggle and smart Hinglish detection
 
 from fastapi import FastAPI, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,16 +17,41 @@ import re
 # Load environment variables
 load_dotenv()
 
-app = FastAPI(title="AI Assistant Backend with RAG (Gemini) - Multi-language")
+app = FastAPI(title="AI Assistant Backend with RAG (Gemini) - Hindi/English")
 
-# Enable CORS
+# Enhanced CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "https://your-deployed-domain.com",
+        "*"  # For development only
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Accept-Language", 
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "X-Language",
+        "Session-Id",
+        "Origin",
+        "Access-Control-Request-Method",
+        "Access-Control-Request-Headers",
+    ],
+    expose_headers=["*"],
+    max_age=86400,
 )
+
+@app.options("/{full_path:path}")
+async def options_handler(request: Request, full_path: str):
+    return {"message": "OK"}
 
 # Logging setup
 logging.basicConfig(
@@ -36,7 +61,6 @@ logging.basicConfig(
 )
 logs_dir = Path("logs")
 logs_dir.mkdir(exist_ok=True)
-
 
 def log_message(user_id, message, request: Request, is_user=True, response=None, error=None, language="en"):
     """Save chat logs with language"""
@@ -68,20 +92,16 @@ def log_message(user_id, message, request: Request, is_user=True, response=None,
     if is_user:
         logging.info(f"[{language.upper()}] User {user_id} ({log_entry['ip_address']}): {message}")
     else:
-        logging.info(f"[{language.upper()}] AI Response to {user_id}: {response[:100]}...")
-
+        logging.info(f"[{language.upper()}] AI Response to {user_id}: {response[:100] if response else 'None'}...")
 
 def get_user_id(session_id: str = None):
     if not session_id:
         session_id = str(uuid.uuid4())
     return session_id
 
-
-# ------------------ Enhanced Language Detection ------------------
-
+# Enhanced Language Detection
 def is_hindi_devanagari(text: str) -> bool:
     """Detect Hindi text using Devanagari Unicode range"""
-    # Devanagari Unicode range: U+0900-U+097F
     devanagari_pattern = re.compile(r'[\u0900-\u097F]')
     devanagari_chars = len(devanagari_pattern.findall(text))
     total_chars = len([c for c in text if c.isalpha()])
@@ -89,123 +109,186 @@ def is_hindi_devanagari(text: str) -> bool:
     if total_chars == 0:
         return False
     
-    # If more than 30% characters are Devanagari, it's Hindi
     return (devanagari_chars / total_chars) > 0.3
 
-
 def is_hinglish_query(text: str) -> bool:
-    """Enhanced Hinglish detection"""
+    """Enhanced Hinglish detection with comprehensive indicators"""
     text_lower = text.lower().strip()
 
+    # Comprehensive Hinglish indicators
     hinglish_indicators = {
-        # Core Hindi words in Roman script
-        "kya", "kaise", "kaun", "kab", "kyun", "kyu", "kahan", "kitna", "kitni",
-        "karo", "karna", "karte", "karta", "karenge", "hai", "hain", "nahi", "haan",
-        "aap", "aapka", "aapko", "yeh", "ye", "woh", "wo", "mera", "mere", "tera", "tere",
-        "batao", "bataiye", "chahiye", "chaahiye", "mein", "main", "hum", "humara",
-        "tum", "tumhara", "unka", "uska", "iska", "jaise", "waise", "phir", "fir",
-        "abhi", "sabhi", "sab", "kuch", "koi", "agar", "lekin", "par", "aur", "ya",
-        "bhi", "bhai", "didi", "sir", "madam", "sahab", "ji", "accha", "theek",
-        "samjha", "samjhi", "pata", "malum", "dekho", "dekhe", "suno", "suniye",
-        "boliye", "kaho", "kehte", "milta", "milega", "hoga", "hogi", "hogaye",
-        "gaya", "gayi", "liya", "diya", "kiya", "hua", "hui", "wala", "wale", "wali"
+        # Question words
+        "kya", "kaise", "kaun", "kab", "kyun", "kyu", "kahan", "kitna", "kitni", "kab",
+        
+        # Verbs and actions
+        "karo", "karna", "karte", "karta", "karenge", "hai", "hain", "hoga", "hogi", "hogaye",
+        "gaya", "gayi", "liya", "diya", "kiya", "hua", "hui", "dekho", "dekhe", "suno", "suniye",
+        "boliye", "kaho", "kehte", "milta", "milega", "batao", "bataiye", "samjha", "samjhi",
+        
+        # Common words
+        "nahi", "haan", "aap", "aapka", "aapko", "yeh", "ye", "woh", "wo", "mera", "mere", 
+        "tera", "tere", "chahiye", "chaahiye", "mein", "main", "hum", "humara", "tumhara",
+        "unka", "uska", "iska", "jaise", "waise", "phir", "fir", "abhi", "sabhi", "sab",
+        "kuch", "koi", "agar", "lekin", "par", "aur", "ya", "bhi",
+        
+        # Respectful terms
+        "bhai", "didi", "sir", "madam", "sahab", "ji", "uncle", "aunty",
+        
+        # Expressions
+        "accha", "theek", "pata", "malum", "wala", "wale", "wali", "waala", "waale", "waali",
+        
+        # Agricultural/fertilizer specific Hinglish
+        "navyakosh", "fertilizer", "organic", "benefits", "fayde", "price", "cost", "rate",
+        "khareed", "lagana", "apply", "soil", "mitti", "crop", "fasal", "khet", "kheti",
+        "ugana", "paida", "quantity", "amount", "milega", "available", "kahan", "where"
     }
 
     words = re.findall(r"\b\w+\b", text_lower)
     hinglish_word_count = sum(1 for word in words if word in hinglish_indicators)
 
-    # Enhanced pattern matching
+    # Enhanced pattern matching for Hinglish
     hinglish_patterns = [
-        r"\baap\b.*\b(kya|kaise)\b",
-        r"\b(kya|kaise)\b.*\b(hai|ho|hoga)\b",
+        r"\baap\b.*\b(kya|kaise|kab|kahan)\b",
+        r"\b(kya|kaise|kab|kahan)\b.*\b(hai|ho|hoga|milega)\b", 
         r"\bmujhe\b.*\bchahiye\b",
-        r"\b(mera|tera|uska)\b.*\b(hai|hoga)\b",
+        r"\b(mera|tera|uska|hamara)\b.*\b(hai|hoga|chahiye)\b",
         r"\b(samjha|pata|malum)\b",
-        r"\b(theek|accha)\b.*\b(hai|hoga)\b"
+        r"\b(theek|accha|okay)\b.*\b(hai|hoga)\b",
+        r"\b(kitni|kitna)\b.*\b(quantity|price|cost|amount)\b",
+        r"\bkahan\b.*\b(milega|khareed|available)\b",
+        r"\bnavyakosh\b.*\b(kya|kaise|kahan|kitna)\b",
+        r"\b(organic|fertilizer)\b.*\b(hai|hoga|chahiye|kaise)\b"
     ]
 
     pattern_matches = sum(1 for p in hinglish_patterns if re.search(p, text_lower))
-
-    total_words = len(words)
-    if total_words == 0:
-        return False
-
+    total_words = len(words) if words else 1
     hinglish_ratio = hinglish_word_count / total_words
 
-    # More flexible detection
-    return (hinglish_ratio > 0.25) or (hinglish_word_count >= 2 and pattern_matches > 0) or (pattern_matches >= 1)
+    # More aggressive Hinglish detection
+    return (hinglish_ratio > 0.1) or (hinglish_word_count >= 1 and pattern_matches > 0) or (pattern_matches >= 1)
 
-
-def detect_language_from_query(text: str, header_language: str) -> str:
-    """Enhanced language detection supporting en, hinglish, hi"""
-    # First check for Hindi (Devanagari)
+def detect_smart_language(text: str, user_preference: str) -> str:
+    """
+    Smart language detection that responds appropriately:
+    - If user writes in Hindi (Devanagari), respond in Hindi
+    - If user writes in Hinglish, respond in Hinglish (regardless of toggle)
+    - If user writes in English and toggle is English, respond in English
+    - If user writes in English and toggle is Hindi, respond in Hindi
+    """
+    logging.info(f"Smart detection for: '{text}' with user preference: '{user_preference}'")
+    
+    # First check for Hindi (Devanagari) - always respond in Hindi
     if is_hindi_devanagari(text):
+        logging.info("Detected: Hindi (Devanagari) - will respond in Hindi")
         return "hi"
     
-    # Then check for Hinglish (romanized Hindi)
+    # Check for Hinglish - always respond in Hinglish regardless of toggle
     if is_hinglish_query(text):
+        logging.info("Detected: Hinglish - will respond in Hinglish")
         return "hinglish"
     
-    # Default to header language or English
-    if header_language in ["en", "hinglish", "hi"]:
-        return header_language
-    
-    return "en"
+    # Pure English text - follow user preference
+    if user_preference == "hi":
+        logging.info("Detected: English text with Hindi preference - will respond in Hindi")
+        return "hi"
+    else:
+        logging.info("Detected: English text with English preference - will respond in English")
+        return "en"
 
-
-def get_language_instruction(detected_language: str) -> str:
-    """Get language-specific instructions for AI responses"""
-    if detected_language == "en":
+def get_language_instruction(response_language: str) -> str:
+    """Language-specific response instructions"""
+    if response_language == "en":
         return (
-            "\n- Answer in **English only**.\n"
-            "- Use a respectful, professional tone, keep it concise (2–5 sentences).\n"
-            "- Use bullet points with emojis for clarity when listing items.\n"
-            "- ❌ Do NOT respond in Hinglish or Hindi/Devanagari.\n"
+            "\n- IMPORTANT: Answer ONLY in pure English language.\n"
+            "- Do NOT use any Hindi words, Roman Hindi, or Hinglish at all.\n"
+            "- Use professional, clear English that international users can understand.\n"
+            "- Keep responses informative but concise (3-6 sentences).\n"
+            "- Use bullet points with emojis when listing benefits or instructions.\n"
+            "- Focus on practical, actionable information about the products.\n"
+            "- Example: 'Navyakosh is an organic fertilizer that provides excellent benefits for crop growth.'\n"
+            "- NEVER use words like: hai, kya, kaise, aur, ke, etc.\n"
         )
-    elif detected_language == "hinglish":
+    elif response_language == "hinglish":
         return (
-            "\n- Answer **STRICTLY in Romanized Hindi (Hinglish)**.\n"
-            "- Mix Hindi words with English technical terms naturally.\n"
-            "- Keep respectful tone, 2–5 sentences, use common Hinglish phrases.\n"
+            "\n- Answer in **natural Hinglish** (mix of English and romanized Hindi).\n"
+            "- Use common Hindi words mixed with English technical terms naturally.\n"
+            "- Keep tone friendly and conversational, like talking to a friend.\n"
             "- Use bullet points with emojis for clarity.\n"
-            "- Example style: 'Yeh product bahut accha hai aur organic farming ke liye best hai.'\n"
-            "- ❌ Do NOT respond in pure English or Devanagari script.\n"
+            "- Example style: 'Navyakosh ek organic fertilizer hai jo crops ke liye bahut beneficial hai.'\n"
+            "- Use words like: hai, kya, kaise, aur, ke liye, etc. naturally\n"
+            "- NEVER use pure English or Devanagari script.\n"
         )
-    else:  # Hindi (hi)
+    else:  # Hindi
         return (
             "\n- Answer in **Hindi using Devanagari script only**.\n"
-            "- Use respectful Hindi tone with appropriate honorifics (आप, जी).\n"
-            "- Keep response concise (2–5 sentences).\n"
+            "- Use respectful Hindi with proper honorifics (आप, जी).\n"
+            "- Keep responses informative and respectful.\n"
             "- Use bullet points with emojis for clarity.\n"
             "- Technical terms can be in English if no Hindi equivalent exists.\n"
-            "- ❌ Do NOT respond in English or Romanized Hindi.\n"
+            "- NEVER respond in English or romanized Hindi.\n"
         )
 
-
 def get_fallback_message(language: str) -> str:
-    """Get appropriate fallback message based on language"""
+    """Enhanced fallback messages"""
     if language == "en":
-        return "🙏 Sorry, I don't have that information right now. Please contact our support team for more details."
-    elif language == "hinglish":
-        return "🙏 Sorry, mere paas yeh information abhi nahi hai. Please support team se contact kariye."
-    else:  # Hindi
-        return "🙏 क्षमा करें, मेरे पास अभी यह जानकारी उपलब्ध नहीं है। कृपया हमारी सहायता टीम से संपर्क करें।"
+        return """🌱 I'm here to help with information about Navyakosh Organic Fertilizer and agricultural products. 
 
+Please ask me about:
+• Product benefits and features
+• Application methods for different crops  
+• Pricing and availability
+• Soil health and organic farming
+
+Try asking something like "What is Navyakosh?" or "How to use organic fertilizer?"
+        
+If you need immediate assistance, please contact our support team."""
+        
+    elif language == "hinglish":
+        return """🌱 Main Navyakosh Organic Fertilizer aur agriculture products ke baare mein help kar sakta hun.
+
+Aap mujhse pooch sakte hain:
+• Product ke benefits aur features
+• Different crops ke liye kaise use karna hai
+• Price aur kahan milta hai  
+• Soil health aur organic farming
+
+Try karo kuch aise puchna: "Navyakosh kya hai?" ya "Organic fertilizer kaise use karte hain?"
+
+Agar urgent help chahiye toh support team se contact karo."""
+        
+    else:  # Hindi
+        return """🌱 मैं नव्याकोष जैविक उर्वरक और कृषि उत्पादों के बारे में जानकारी देने के लिए यहाँ हूँ।
+
+आप मुझसे पूछ सकते हैं:
+• उत्पाद के फायदे और विशेषताएं  
+• विभिन्न फसलों के लिए उपयोग की विधि
+• मूल्य और उपलब्धता
+• मिट्टी का स्वास्थ्य और जैविक खेती
+
+कुछ इस तरह पूछने की कोशिश करें: "नव्याकोष क्या है?" या "जैविक उर्वरक का उपयोग कैसे करें?"
+
+तत्काल सहायता के लिए हमारी सहायता टीम से संपर्क करें।"""
 
 # Configure Gemini
 api_key = os.getenv("GEMINI_API_KEY")
 if api_key:
-    genai.configure(api_key=api_key)
+    try:
+        genai.configure(api_key=api_key)
+        logging.info("✅ Gemini API configured successfully")
+    except Exception as e:
+        logging.error(f"❌ Failed to configure Gemini API: {e}")
+        api_key = None
 
-# ------------------ Init RAG ------------------
+# Init RAG
 rag_system = None
 if api_key:
-    rag_system = RAGSystem(api_key)
-    print("📑 Building vectorstore (brand_data.json + scraped_data/*.txt if available)...")
-    rag_system.build_vectorstore(use_scraped=True)
-
-
-# ----------------------------------------------------------------------
+    try:
+        rag_system = RAGSystem(api_key)
+        print("📑 Building vectorstore...")
+        rag_system.build_vectorstore(use_scraped=True)
+        logging.info("✅ RAG System initialized")
+    except Exception as e:
+        logging.error(f"❌ RAG System failed: {e}")
 
 @app.post("/api/chat")
 async def chat(
@@ -220,162 +303,117 @@ async def chat(
             return {"error": "Message is required", "success": False}
 
         user_id = get_user_id(session_id)
+        
+        # Smart language detection
+        response_language = detect_smart_language(message, x_language)
+        log_message(user_id, message, request, is_user=True, language=response_language)
 
-        # Enhanced language detection
-        detected_language = detect_language_from_query(message, x_language)
-        log_message(user_id, message, request, is_user=True, language=detected_language)
-
-        if not api_key:
-            error_msg = "Gemini API key not configured."
-            if detected_language == "hinglish":
-                error_msg = "Gemini API key configure nahi hai."
-            elif detected_language == "hi":
-                error_msg = "जेमिनी API की कॉन्फ़िगर नहीं है।"
-            return {"error": error_msg, "success": False}
-            
-        if not rag_system:
-            error_msg = "RAG system not initialized"
-            if detected_language == "hinglish":
-                error_msg = "RAG system initialize nahi hua hai."
-            elif detected_language == "hi":
-                error_msg = "RAG सिस्टम प्रारंभ नहीं हुआ है।"
+        if not api_key or not rag_system:
+            error_msg = get_fallback_message(response_language)
+            log_message(user_id, message, request, is_user=False, error="API/RAG not configured", language=response_language)
             return {"error": error_msg, "success": False}
 
         personal_info = rag_system.get_personal_info()
 
-        # ---------------- Query Refinement ----------------
-        query_refiner_prompt = f"""
-Refine the user question into a precise search query for better information retrieval.
-Focus on key terms and main intent.
-
-User's Original Question: "{message}"
-Language Context: {detected_language}
-
-Refined Search Query:
-"""
-        
+        # Context retrieval
         try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            query_refiner_response = model.generate_content(query_refiner_prompt)
-            refined_query = query_refiner_response.text.strip()
+            logging.info(f"Searching for context with query: '{message}'")
+            relevant_context = rag_system.search_relevant_context(message, k=5)
+            logging.info(f"Retrieved context length: {len(relevant_context)} chars")
+            
+            # If no context found, try with key terms
+            if len(relevant_context.strip()) < 50:
+                key_terms = ["navyakosh", "organic", "fertilizer", "benefits", "application", "crops"]
+                for term in key_terms:
+                    if term.lower() in message.lower():
+                        relevant_context = rag_system.search_relevant_context(term, k=3)
+                        if len(relevant_context.strip()) > 50:
+                            break
+                            
         except Exception as e:
-            logging.warning(f"Query refinement failed: {e}")
-            refined_query = message
+            logging.warning(f"Context retrieval failed: {e}")
+            relevant_context = "Information about Navyakosh Organic Fertilizer and agricultural products."
 
-        # ---------------- RAG Context Retrieval ----------------
-        try:
-            relevant_context = rag_system.search_relevant_context(refined_query, k=4)
-        except Exception as e:
-            logging.warning(f"RAG context retrieval failed: {e}")
-            relevant_context = "Unable to retrieve relevant information from knowledge base."
+        # Response generation with smart language selection
+        lang_instruction = get_language_instruction(response_language)
+        fallback_message = get_fallback_message(response_language)
 
-        # ---------------- Language-specific Instructions ----------------
-        lang_instruction = get_language_instruction(detected_language)
-        fallback_message = get_fallback_message(detected_language)
+        final_answer_prompt = f"""You are a helpful agricultural assistant for {personal_info.get('name', 'LCB Fertilizers')}.
 
-        # ---------------- Final Answer Generation ----------------
-        final_answer_prompt = f"""
-You are a helpful and knowledgeable FAQ assistant for {personal_info['name']}, specializing in agricultural products and organic fertilizers.
+USER QUESTION: "{message}"
+USER LANGUAGE PREFERENCE: {x_language}
+DETECTED RESPONSE LANGUAGE: {response_language}
 
-<USER_QUESTION>
-{message}
-</USER_QUESTION>
-
-<RELEVANT_CONTEXT>
+RELEVANT INFORMATION:
 {relevant_context}
-</RELEVANT_CONTEXT>
 
-<RESPONSE_GUIDELINES>
+RESPONSE GUIDELINES:
 {lang_instruction}
 
-CONTENT INSTRUCTIONS:
-- If the context contains relevant information, provide a comprehensive but concise answer.
-- Focus on practical, actionable information.
-- If asking about products, include benefits, usage, and application details.
-- For technical questions, explain in simple terms.
-- If no relevant information is found, respond with: "{fallback_message}"
-- Maintain consistency with the brand voice and agricultural expertise.
-</RESPONSE_GUIDELINES>
+IMPORTANT CONTEXT:
+- The user has set their language toggle to: {x_language}
+- Based on their message, I've determined the best response language is: {response_language}
+- If response_language is "hinglish", use natural mix of English and romanized Hindi
+- If response_language is "hi", use only Devanagari script
+- If response_language is "en", use only English
 
-Provide your response now:
-"""
+Always be helpful and provide practical agricultural advice. Focus on Navyakosh benefits and usage.
+
+Provide your response now:"""
 
         try:
-            final_model = genai.GenerativeModel("gemini-1.5-flash")
-            final_response = final_model.generate_content(final_answer_prompt)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            final_response = model.generate_content(final_answer_prompt)
             ai_response = final_response.text.strip()
+            
+            if not ai_response or len(ai_response.strip()) < 10:
+                ai_response = fallback_message
+                
+            logging.info(f"Generated response length: {len(ai_response)} chars")
+            
         except Exception as e:
             logging.error(f"AI response generation failed: {e}")
             ai_response = fallback_message
 
-        log_message(user_id, message, request, is_user=False, response=ai_response, language=detected_language)
+        log_message(user_id, message, request, is_user=False, response=ai_response, language=response_language)
 
         return {
             "response": ai_response,
             "success": True,
-            "refined_query": refined_query,
             "session_id": user_id,
-            "language": x_language,
-            "detected_language": detected_language,
+            "user_language_preference": x_language,
+            "response_language": response_language,
         }
 
     except Exception as e:
         logging.error(f"Chat endpoint error: {e}")
-        error_response = "An unexpected error occurred. Please try again."
-        if x_language == "hinglish":
-            error_response = "Koi unexpected error hua hai. Please try again kariye."
-        elif x_language == "hi":
-            error_response = "एक अप्रत्याशित त्रुटि हुई है। कृपया पुनः प्रयास करें।"
-            
         return {
-            "error": error_response,
+            "error": "An error occurred processing your request.",
             "success": False,
-            "detected_language": x_language
+            "user_language_preference": x_language
         }
-
 
 @app.get("/api/health")
 async def health_check():
-    """Enhanced health check with language support info"""
+    """Health check endpoint"""
     return {
         "status": "healthy",
         "api_key": "configured" if api_key else "not configured",
         "rag_system": "initialized" if rag_system else "not initialized",
-        "supported_languages": ["en", "hinglish", "hi"],
-        "language_features": {
-            "english": "Full support",
-            "hinglish": "Romanized Hindi support",
-            "hindi": "Devanagari script support"
-        }
+        "supported_languages": ["en", "hi"],
+        "smart_detection": "enabled",
+        "cors": "enabled"
     }
 
-
-@app.get("/api/languages")
-async def get_supported_languages():
-    """Endpoint to get supported languages"""
+@app.get("/api/cors-test")
+async def cors_test():
+    """Test CORS functionality"""
     return {
-        "supported_languages": [
-            {
-                "code": "en",
-                "name": "English",
-                "display": "English",
-                "description": "Full English language support"
-            },
-            {
-                "code": "hinglish", 
-                "name": "Hinglish",
-                "display": "English + Hindi",
-                "description": "Mixed English and Romanized Hindi"
-            },
-            {
-                "code": "hi",
-                "name": "Hindi",
-                "display": "हिंदी", 
-                "description": "Hindi in Devanagari script"
-            }
-        ]
+        "message": "CORS is working!",
+        "timestamp": datetime.now().isoformat(),
+        "status": "success"
     }
-
 
 if __name__ == "__main__":
+    print("🚀 Starting server with smart language detection (EN/HI toggle)...")
     uvicorn.run("app:app", host="0.0.0.0", port=5001, reload=True)
