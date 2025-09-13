@@ -12,27 +12,36 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+# OPTIONAL: local embeddings (no quota issues)
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
 
 class RAGSystem:
-    def __init__(self, gemini_api_key: str, collection_name: str = "brand_kb"):
+    def __init__(self, gemini_api_key: str, collection_name: str = "brand_kb", use_local_embeddings: bool = False):
         """
         RAG system for brand & product knowledge (Gemini + Chroma).
 
         Args:
             gemini_api_key: Google AI Studio (Gemini) API key
             collection_name: ChromaDB collection name
+            use_local_embeddings: if True, use HuggingFace instead of Gemini
         """
-        if not gemini_api_key:
-            raise ValueError("Gemini API key is required")
+        if not gemini_api_key and not use_local_embeddings:
+            raise ValueError("Gemini API key is required unless using local embeddings")
 
         self.gemini_api_key = gemini_api_key
         self.collection_name = collection_name
 
-        # Gemini embeddings
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            google_api_key=gemini_api_key
-        )
+        # Choose embeddings
+        if use_local_embeddings:
+            print("⚡ Using HuggingFace local embeddings (no quota limits)")
+            self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        else:
+            print("🔑 Using Gemini embeddings (quota-limited)")
+            self.embeddings = GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                google_api_key=gemini_api_key
+            )
 
         # ChromaDB persistent client
         self.chroma_client = chromadb.PersistentClient(
@@ -53,11 +62,8 @@ class RAGSystem:
         self.data_cache: Dict[str, Any] = {}
 
     # ---------------- Brand JSON Loader ----------------
-
     def _brand_json_path(self, json_path: Optional[str] = None) -> Path:
-        if json_path:
-            return Path(json_path)
-        return Path(__file__).parent / "brand_data.json"
+        return Path(json_path) if json_path else Path(__file__).parent / "brand_data.json"
 
     def load_brand_data(self, json_path: Optional[str] = None) -> Dict[str, Any]:
         path = self._brand_json_path(json_path)
@@ -67,7 +73,6 @@ class RAGSystem:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        # Minimal validation
         if "brand" not in data or "name" not in data["brand"]:
             raise ValueError("brand_data.json must include: { 'brand': { 'name': ... } }")
 
@@ -78,12 +83,7 @@ class RAGSystem:
         return data
 
     # ---------------- TXT Loader ----------------
-
     def load_scraped_text_data(self, txt_dir: str = "scraped_data") -> List[Document]:
-        """
-        Load scraped website data from .txt files.
-        Returns a list of LangChain Documents.
-        """
         loader = DirectoryLoader(
             txt_dir,
             glob="*.txt",
@@ -91,16 +91,11 @@ class RAGSystem:
             loader_kwargs={"encoding": "utf-8"}
         )
         documents = loader.load()
-
         if not documents:
             raise ValueError(f"No text files found in {txt_dir}")
-
-        # Split into smaller chunks
-        docs = self.text_splitter.split_documents(documents)
-        return docs
+        return self.text_splitter.split_documents(documents)
 
     # ---------------- Summary ----------------
-
     def _generate_summary_text(self, data: Dict[str, Any]) -> str:
         brand = data.get("brand", {})
         name = brand.get("name", "Unknown Brand")
@@ -130,36 +125,21 @@ class RAGSystem:
         return "\n".join(parts)
 
     # ---------------- Build Vectorstore ----------------
-
     def build_vectorstore(self, json_path: Optional[str] = None, use_scraped: bool = True):
-        """
-        Build vector DB from brand_data.json + scraped text files
-        """
-        print("🔧 Building vector DB...")
+        print("🔧 Building/loading vector DB...")
         data = self.load_brand_data(json_path=json_path)
         self.profile_summary = self._generate_summary_text(data)
 
-        # Create documents from brand_data.json
         docs: List[Document] = []
         if "brand" in data:
-            docs.append(Document(
-                page_content=json.dumps(data["brand"], indent=2),
-                metadata={"type": "brand"}
-            ))
+            docs.append(Document(page_content=json.dumps(data["brand"], indent=2), metadata={"type": "brand"}))
 
         for p in data.get("products", []):
-            docs.append(Document(
-                page_content=json.dumps(p, indent=2),
-                metadata={"type": "product"}
-            ))
+            docs.append(Document(page_content=json.dumps(p, indent=2), metadata={"type": "product"}))
 
         for f in data.get("faqs", []):
-            docs.append(Document(
-                page_content=f"Q: {f.get('q')}\nA: {f.get('a')}",
-                metadata={"type": "faq"}
-            ))
+            docs.append(Document(page_content=f"Q: {f.get('q')}\nA: {f.get('a')}", metadata={"type": "faq"}))
 
-        # Add scraped text files
         if use_scraped:
             try:
                 scraped_docs = self.load_scraped_text_data("scraped_data")
@@ -168,23 +148,36 @@ class RAGSystem:
             except Exception as e:
                 print(f"⚠️ Skipping scraped data: {e}")
 
-        # Build Chroma
-        self.vectorstore = Chroma.from_documents(
-            documents=docs,
-            embedding=self.embeddings,
-            collection_name=self.collection_name,
-            client=self.chroma_client
-        )
-        print("✅ Vector DB built successfully!")
+        try:
+            collection = self.chroma_client.get_or_create_collection(self.collection_name)
+            if collection.count() == 0:
+                # First time → embed docs
+                self.vectorstore = Chroma.from_documents(
+                    documents=docs,
+                    embedding=self.embeddings,
+                    collection_name=self.collection_name,
+                    client=self.chroma_client
+                )
+                print("✅ Vector DB built & persisted!")
+            else:
+                # Reload existing without re-embedding
+                self.vectorstore = Chroma(
+                    embedding_function=self.embeddings,
+                    collection_name=self.collection_name,
+                    client=self.chroma_client
+                )
+                print("♻️ Loaded existing vector DB (no new embeddings)")
+        except Exception as e:
+            print(f"❌ Failed to build/load vector DB: {e}")
+            self.vectorstore = None
 
     # ---------------- Retrieval ----------------
-
     def get_summary_document(self) -> str:
         return self.profile_summary
 
     def search_relevant_context(self, query: str, k: int = 5) -> str:
         if not self.vectorstore:
-            raise ValueError("Vector DB not built. Call build_vectorstore() first.")
+            return "⚠️ No knowledge base available (embedding quota exceeded)."
 
         retriever = self.vectorstore.as_retriever(
             search_type="mmr",
@@ -199,21 +192,14 @@ class RAGSystem:
                 unique_docs.append(d)
                 seen.add(d.page_content)
 
-        ctx_parts = []
-        for i, d in enumerate(unique_docs, 1):
-            ctx_parts.append(f"Context {i}:\n{d.page_content}")
-        return "\n\n".join(ctx_parts)
+        return "\n\n".join([f"Context {i}:\n{d.page_content}" for i, d in enumerate(unique_docs, 1)])
 
     # ---------------- Backward compatibility ----------------
-
     def get_personal_info(self) -> Dict[str, Any]:
         if not self.data_cache:
             self.load_brand_data()
         brand = self.data_cache.get("brand", {})
-        return {
-            "name": brand.get("name", "Brand"),
-            "title": brand.get("tagline", "Brand Assistant")
-        }
+        return {"name": brand.get("name", "Brand"), "title": brand.get("tagline", "Brand Assistant")}
 
     def get_brand_info(self) -> Dict[str, Any]:
         if not self.data_cache:
