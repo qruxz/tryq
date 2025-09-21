@@ -1,6 +1,5 @@
 fastapi==0.111.0
 uvicorn==0.29.0
-gunicorn
 
 google-generativeai==0.3.2
 
@@ -9,9 +8,12 @@ langchain-google-genai==0.0.5
 langchain-community==0.0.10
 
 sentence-transformers==2.2.2
-chromadb==0.4.22
+
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.30
+pgvector==0.2.3
+huggingface-hub==0.16.4
+
+
 
 python-dotenv==1.0.0
-
-requests
-beautifulsoup4
